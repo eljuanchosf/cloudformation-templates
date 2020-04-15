@@ -1,0 +1,84 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters: 
+  ResourcePrefix: 
+    Type: String
+  ResourceEnvironment:
+    Type: String
+
+Resources:
+  DeliveryBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      VersioningConfiguration:
+        Status: Enabled
+      AccessControl: Private
+      BucketName:
+        !Join
+          - '-'
+          - - !Ref AWS::StackName
+            - 'deliverybucket'
+  DeliveryRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        !Join
+          - '-'
+          - - !Ref AWS::StackName
+            - 'deliveryrole' 
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: ''
+            Effect: Allow
+            Principal:
+              Service: firehose.amazonaws.com
+            Action: 'sts:AssumeRole'
+            Condition:
+              StringEquals:
+                'sts:ExternalId': !Ref 'AWS::AccountId'
+             
+  DeliveryPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName:
+        !Join
+          - '-'
+          - - !Ref AWS::StackName
+            - 'deliverypolicy' 
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - 's3:AbortMultipartUpload'
+              - 's3:GetBucketLocation'
+              - 's3:GetObject'
+              - 's3:ListBucket'
+              - 's3:ListBucketMultipartUploads'
+              - 's3:PutObject'
+            Resource:
+                - !GetAtt DeliveryBucket.Arn
+                - Fn::Join:
+                    - /
+                    - - !GetAtt DeliveryBucket.Arn
+                      - '*'
+      Roles:
+        - !Ref DeliveryRole
+
+  DeliveryStream:
+    Type: AWS::KinesisFirehose::DeliveryStream
+    Properties:
+      DeliveryStreamName:
+        !Join
+        - '-'
+        - - !Ref AWS::StackName
+          - 'deliverystream'         
+      S3DestinationConfiguration:
+        BucketARN: !GetAtt DeliveryBucket.Arn
+        BufferingHints: 
+          IntervalInSeconds: 60
+          SizeInMBs: 1
+        CompressionFormat: UNCOMPRESSED
+        Prefix: firehose/
+        RoleARN: !GetAtt DeliveryRole.Arn

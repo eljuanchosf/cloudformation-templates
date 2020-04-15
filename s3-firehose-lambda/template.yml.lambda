@@ -1,0 +1,150 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters: 
+  ResourcePrefix: 
+    Type: String
+  ResourceEnvironment:
+    Type: String
+
+Resources:
+  DeliveryBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      VersioningConfiguration:
+        Status: Enabled
+      AccessControl: Private
+      BucketName:
+        !Join
+          - '-'
+          - - !Ref AWS::StackName
+            - 'deliverybucket'
+  DeliveryRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        !Join
+          - '-'
+          - - !Ref AWS::StackName
+            - 'deliveryrole' 
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: ''
+            Effect: Allow
+            Principal:
+              Service: firehose.amazonaws.com
+            Action: 'sts:AssumeRole'
+            Condition:
+              StringEquals:
+                'sts:ExternalId': !Ref 'AWS::AccountId'
+             
+  DeliveryPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName:
+        !Join
+          - '-'
+          - - !Ref AWS::StackName
+            - 'deliverypolicy' 
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - 's3:AbortMultipartUpload'
+              - 's3:GetBucketLocation'
+              - 's3:GetObject'
+              - 's3:ListBucket'
+              - 's3:ListBucketMultipartUploads'
+              - 's3:PutObject'
+            Resource:
+                - !GetAtt DeliveryBucket.Arn
+                - Fn::Join:
+                    - /
+                    - - !GetAtt DeliveryBucket.Arn
+                      - '*'
+      Roles:
+        - !Ref DeliveryRole
+
+  DeliveryStream:
+    Type: AWS::KinesisFirehose::DeliveryStream
+    Properties:
+      DeliveryStreamName:
+        !Join
+        - '-'
+        - - !Ref AWS::StackName
+          - 'deliverystream'         
+      ExtendedS3DestinationConfiguration:
+        BucketARN: !GetAtt DeliveryBucket.Arn
+        BufferingHints:
+          IntervalInSeconds: 60
+          SizeInMBs: 50
+        CompressionFormat: UNCOMPRESSED
+        Prefix: firehose/
+        RoleARN: !GetAtt DeliveryRole.Arn
+        ProcessingConfiguration:
+          Enabled: true
+          Processors:
+            - Parameters:
+                - ParameterName: LambdaArn
+                  ParameterValue: !GetAtt ProcessLambdaFunction.Arn 
+              Type: Lambda
+
+  ProcessLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        !Join
+          - '-'
+          - - !Ref AWS::StackName
+            - 'processlambdaexecutionrole' 
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Policies:
+        - PolicyName: allowLambdaLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+            - Effect: Allow
+              Action:
+              - logs:*
+              Resource: arn:aws:logs:*:*:*
+
+  ProcessLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName:
+        !Join
+          - '-'
+          - - !Ref AWS::StackName
+            - 'processlambdafunction'      
+      Code:
+        ZipFile: >
+          console.log('Loading function');
+          exports.handler = function(event, context) {
+              console.log(JSON.stringify(event));
+              let records = [];
+              for(let i = 0; i<event.records.length; i++) {
+                 let payload = new Buffer(event.records[i].data, 'base64').toString('ascii');
+                 payload = JSON.parse(payload);
+                 payload.decoded = true;
+                 records.push({
+                   recordId: event.records[i].recordId,
+                   result: 'Ok',
+                   data: Buffer.from(JSON.stringify(payload)).toString('base64')});
+              }
+              console.log(`Return: ${ JSON.stringify({records}) }`)
+              return Promise.resolve({records});
+          };
+      Handler: index.handler
+      Role: !GetAtt ProcessLambdaExecutionRole.Arn
+      Runtime: nodejs12.x
+      Timeout: 60
+      MemorySize: 128
