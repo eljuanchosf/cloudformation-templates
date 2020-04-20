@@ -10,14 +10,19 @@ create-stack:
 	aws --profile $(AWS_PROFILE) cloudformation create-stack --stack-name "$(AWS_PREFIX)-$(AWS_ENVIRONMENT)-$(STACK)" \
         --template-body file:///$(ROOT_DIR)/$(STACK)/template.yml \
 		--capabilities CAPABILITY_NAMED_IAM \
-		--parameters ParameterKey=ResourcePrefix,ParameterValue=$(AWS_PREFIX) \
-		             ParameterKey=ResourceEnvironment,ParameterValue=$(AWS_ENVIRONMENT)
+		--parameters file:///$(ROOT_DIR)/$(STACK)/parameters.json
 
 ## delete-stack: deltes the stack and its components. Usage is "make STACK=dirname create-stack"
 delete-stack:
 	@echo "> Deleting stack..."
 	cd $(ROOT_DIR)/$(STACK) && \
 	aws --profile $(AWS_PROFILE) cloudformation delete-stack --stack-name "$(AWS_PREFIX)-$(AWS_ENVIRONMENT)-$(STACK)"
+
+## follow-stack: deltes the stack and its components. Usage is "make STACK=dirname create-stack"
+follow-stack:
+	@echo "> Deleting stack..."
+	cd $(ROOT_DIR)/$(STACK) && \
+	aws --profile $(AWS_PROFILE) cloudformation describe-stack-events --stack-name "$(AWS_PREFIX)-$(AWS_ENVIRONMENT)-$(STACK)"
 
 .PHONY: help
 all: help

@@ -1,0 +1,156 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: >
+  Self-contained ElasticSearch service
+
+Parameters:
+  DomainName:
+    Description: The Elasticsearch Domain name
+    Type: String
+
+  VPCCIDR:
+    Description: The VPC CIDR address range for the VPC we will create.
+    Type: String
+    Default: 10.11.12.0/24
+
+  PublicSubnet1CIDR:
+    Description: The public subnet 1 CIDR address range.
+    Type: String
+    Default: 10.11.12.0/28
+
+  ElasticsearchVersion:
+    Description: The Elasticsearch Version
+    Type: String
+    Default: 7.1
+  
+  InstanceType:
+    Description: The data instance type
+    Type: String
+    Default: m5.large.elasticsearch
+  
+  InstanceCount:
+    Type: String
+    Default: 1
+  
+  EBSVolumeSize:
+    Description: The size of the EBS volumes for the service
+    Type: String
+    Default: 20 
+
+Resources:
+  AWSServiceRoleForAmazonElasticsearchService:
+    Type: AWS::IAM::ServiceLinkedRole
+    Properties: 
+      AWSServiceName: es.amazonaws.com
+
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VPCCIDR
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+      - Key: Name
+        Value: !Sub "${AWS::StackName}:VPC"
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+      - Key: Name
+        Value: !Sub "${AWS::StackName}:InternetGateway"
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+      - Key: Name
+        Value: !Sub "${AWS::StackName}:RouteTable"
+
+  Route:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref RouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PublicSubnet1CIDR
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+      - Key: Name
+        Value: !Sub "${AWS::StackName}:PublicSubnet1"
+
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref RouteTable
+
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Limits security group ingress and egress traffic for the ES cluster
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - CidrIp: 0.0.0.0/0
+          FromPort: 443
+          IpProtocol: tcp
+          ToPort: 443
+
+  ElasticsearchDomain:
+    Type: AWS::Elasticsearch::Domain
+    Properties:
+      DomainName: !Sub "${DomainName}-${AWS::StackName}"
+      ElasticsearchVersion: !Ref ElasticsearchVersion
+      ElasticsearchClusterConfig:
+        InstanceCount: !Ref InstanceCount
+        InstanceType: !Ref InstanceType
+      EBSOptions:
+        EBSEnabled: true
+        Iops: 0
+        VolumeSize: !Ref EBSVolumeSize
+        VolumeType: gp2
+      AccessPolicies:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: '*'
+            Action: 'es:*'
+            Resource: !Sub 'arn:aws:es:${AWS::Region}:${AWS::AccountId}:domain/${DomainName}/*'
+      VPCOptions:
+        SecurityGroupIds:
+          - !Ref SecurityGroup
+        SubnetIds:
+          - !Ref PublicSubnet1
+      Tags:
+      - Key: Name
+        Value: !Sub "${AWS::StackName}:ElasticsearchDomain"
+
+  ElasticsearchDomainEndpoint:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/dev/correos-${AWS::StackName}"
+      Type: String
+      Value: !Sub "https://${ElasticsearchDomain.DomainEndpoint}"
+      Tags:
+        "Environment": "DEV"
+
+Outputs:
+  DomainArn:
+    Value: !GetAtt ElasticsearchDomain.DomainArn
+  DomainEndpoint:
+    Value: !Sub "https://${ElasticsearchDomain.DomainEndpoint}"
+  SSMElasticsearchDomainEndpointParameter:
+    Value: !Sub "/dev/correos-${AWS::StackName}"
