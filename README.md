@@ -1,1 +1,3 @@
-# aws-firehose-to-s3
+# cloudformation-templastes
+
+Try with `make help`
